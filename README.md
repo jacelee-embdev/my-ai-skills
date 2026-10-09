@@ -11,6 +11,8 @@ This repository collects AI skills I have written or curated, organized by numbe
 | No. | Skill | Description |
 |-----|-------|-------------|
 | 001 | [embedded-code-style](001_embedded-code-style/SKILL.md) | Normalizes embedded C code (.c/.h) against a custom embedded coding standard, with three modes: full normalization, comment-only normalization, and Chinese-comment modules |
+| 002 | [drawio-diagram](002_drawio-diagram/SKILL.md) | Creates or modifies editable local .drawio architecture diagrams, flowcharts, topology diagrams, and hierarchy diagrams from supplied materials, with a clean visual style and clear connections |
+| 003 | [study-notes](003_study-notes/SKILL.md) | Organizes handouts, slides, explanatory diagrams, course transcripts, and supplementary references into accurate, self-contained Markdown study notes; supports creation, targeted edits, and reviews for fundamental errors |
 
 ## Usage
 

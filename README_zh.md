@@ -11,6 +11,8 @@
 | 编号 | Skill 名称 | 简介 |
 |------|------------|------|
 | 001 | [embedded-code-style](001_embedded-code-style/SKILL.md) | 按自定义《嵌入式代码规范》对嵌入式 C 代码（.c/.h）做规范化整理，支持全量整改、仅注释整改、中文注释三种模式 |
+| 002 | [drawio-diagram](002_drawio-diagram/SKILL.md) | 根据用户材料创建或修改可编辑的本地 .drawio 架构图、流程图、拓扑图及分层关系图，遵循清新简洁的风格与清晰的连线规范 |
+| 003 | [study-notes](003_study-notes/SKILL.md) | 将讲义、PPT、说明图、课程逐字稿及补充参考资料整理为准确、独立可读的 Markdown 学习笔记，支持新建、指定范围局部修改和原则性错误审查 |
 
 ## 使用方法
 
