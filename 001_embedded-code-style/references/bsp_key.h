@@ -6,25 +6,22 @@
  * @file bsp_key.h
  *
  * @par dependencies
- * - stdio.h
  * - stdint.h
- * - main.h
- * - cmsis_os.h
  * - FreeRTOS.h
- * - task.h
  * - queue.h
- * - gpio.h
+ * - cmsis_os.h
  *
  * @author Jace | Development Dept. | JesMicro
  *
- * @brief Provides BSP APIs for key scanning and related RTOS operations.
+ * @brief Declares key states, events, shared RTOS objects, and BSP APIs.
  *
  * Processing flow:
  *
- * Call key_scan() and key_detect_event() from task context,
- * or run key_task_entry() as an RTOS thread.
+ * Call Key_Scan() and Key_DetectEvent() from task context,
+ * or create a thread with Key_TaskEntry() and g_key_task_attributes.
+ * Receive key events from g_key_queue after the queue has been created.
  *
- * @version V1.1 2026-07-26
+ * @version V1.0 2026-10-10
  *
  * @note 1 tab == 4 spaces!
  *
@@ -34,116 +31,119 @@
 #define __BSP_KEY_H__
 
 /****************************** Includes ******************************/
-#include <stdint.h>     // The Compiler Library
-#include <stdio.h>
 
-#include "main.h"       // Core / OS layer
+#include <stdint.h>    /* C 标准库 */
+
+#include "FreeRTOS.h"  /* 第三方中间件层：FreeRTOS / CMSIS-RTOS */
+#include "queue.h"
 #include "cmsis_os.h"
 
-#include "FreeRTOS.h"   // Specific file for operation
-#include "task.h"
-#include "queue.h"
-#include "gpio.h"
 /****************************** Includes ******************************/
 
 /****************************** Defines ******************************/
 
-/************************ Thread Definitions ************************/
-extern osThreadId_t key_task_handle;
-extern const osThreadAttr_t key_task_attributes;
-
-/************************ Queue Handles ************************/
-extern QueueHandle_t g_key_queue;
-
+/* 按键扫描结果 */
 typedef enum
 {
-    KEY_SCAN_OK                   = 0,          /* Success. */
-    KEY_SCAN_ERROR                = 1,          /* General error. */
-    KEY_SCAN_TIMEOUT              = 2,          /* Polling timed out. */
-    KEY_SCAN_RESOURCE_UNAVAILABLE = 3,          /* Resource unavailable. */
-    KEY_SCAN_INVALID_PARAMETER    = 4,          /* Invalid parameter. */
-    KEY_SCAN_OUT_OF_MEMORY        = 5,          /* Out of memory. */
-    KEY_SCAN_ISR_NOT_ALLOWED      = 6,          /* Invalid in ISR context. */
-    KEY_SCAN_RESERVED             = 0x7FFFFFFF  /* Reserved. */
-} key_scan_result_t; /* Return value of key_scan(). */
+    KEY_SCAN_OK                   = 0,          /* 扫描成功 */
+    KEY_SCAN_ERROR                = 1,          /* 一般错误 */
+    KEY_SCAN_TIMEOUT              = 2,          /* 扫描超时 */
+    KEY_SCAN_RESOURCE_UNAVAILABLE = 3,          /* 资源不可用 */
+    KEY_SCAN_INVALID_PARAMETER    = 4,          /* 参数无效 */
+    KEY_SCAN_OUT_OF_MEMORY        = 5,          /* 内存不足 */
+    KEY_SCAN_ISR_NOT_ALLOWED      = 6,          /* 不允许在中断中调用 */
+    KEY_SCAN_RESERVED             = 0x7FFFFFFF  /* 保留值 */
+} key_scan_result_t;
 
+/* 按键物理状态 */
 typedef enum
 {
-    KEY_STATE_PRESSED  = 0,  /* Key is pressed. */
-    KEY_STATE_RELEASED = 1,  /* Key is released. */
-} key_state_t; /* Physical state of the key. */
+    KEY_STATE_PRESSED  = 0,  /* 按键按下 */
+    KEY_STATE_RELEASED = 1,  /* 按键释放 */
+} key_state_t;
 
+/* 按键事件检测结果 */
 typedef enum
 {
-    KEY_DETECT_OK                = 0,  /* Detection completed successfully. */
-    KEY_DETECT_ERROR             = 1,  /* General detection error. */
-    KEY_DETECT_TIMEOUT           = 2,  /* Detection timed out. */
-    KEY_DETECT_INVALID_PARAMETER = 3,  /* Invalid input parameter. */
-} key_detect_result_t; /* Return value of key_detect_event(). */
+    KEY_DETECT_OK                = 0,  /* 检测成功 */
+    KEY_DETECT_ERROR             = 1,  /* 检测错误 */
+    KEY_DETECT_TIMEOUT           = 2,  /* 检测超时 */
+    KEY_DETECT_INVALID_PARAMETER = 3,  /* 参数无效 */
+} key_detect_result_t;
 
+/* 按键事件类型 */
 typedef enum
 {
-    KEY_EVENT_NONE        = 0,  /* No key press event was detected. */
-    KEY_EVENT_SHORT_PRESS = 1,  /* A short key press was detected. */
-    KEY_EVENT_LONG_PRESS  = 2,  /* A long key press was detected. */
-} key_event_t; /* Detected key press event. */
+    KEY_EVENT_NONE        = 0,  /* 无按键事件 */
+    KEY_EVENT_SHORT_PRESS = 1,  /* 短按事件 */
+    KEY_EVENT_LONG_PRESS  = 2,  /* 长按事件 */
+} key_event_t;
 
 /****************************** Defines ******************************/
 
-/************************ Function Declarations ************************/
+/****************************** Declaring ******************************/
+
+extern osThreadId_t g_key_task_handle;             /* 按键任务句柄 */
+extern const osThreadAttr_t g_key_task_attributes; /* 按键任务属性 */
+extern QueueHandle_t g_key_queue;                  /* 按键事件队列句柄 */
 
 /**
- * @brief Scans the key input and reports its debounced state.
+ * @brief 扫描按键输入并输出消抖后的物理状态。
  *
- * Samples the active-low key GPIO twice with a 10 ms debounce delay
- * between samples. If both samples are GPIO_PIN_RESET, the output state
- * is set to KEY_STATE_PRESSED. Otherwise, it is set to KEY_STATE_RELEASED.
+ * 处理步骤：
+ * 1. 检查输出指针是否有效。
+ * 2. 读取按键引脚，延时 10 个系统节拍后再次读取。
+ * 3. 两次均为低电平时输出按下状态，否则输出释放状态。
  *
- * @param[out] p_key_state Pointer to the variable that receives the key state.
- *                         This pointer must not be NULL.
+ * @param[out] p_key_state : 接收按键状态的指针，不得为空。
  *
- * @return key_scan_result_t Result of the key scan.
- * @retval KEY_SCAN_OK                The key state was read successfully.
- * @retval KEY_SCAN_INVALID_PARAMETER The output pointer is NULL.
+ * @return key_scan_result_t : 按键扫描结果。
+ * @retval KEY_SCAN_OK                扫描成功。
+ * @retval KEY_SCAN_INVALID_PARAMETER 输出指针为空。
+ *
+ * @note 该函数包含任务延时，应在任务上下文中调用。
  */
-key_scan_result_t key_scan(key_state_t *p_key_state);
+key_scan_result_t Key_Scan(key_state_t *p_key_state);
 
 /**
- * @brief Entry function for the key-event detection task.
+ * @brief 检测按键并区分短按和长按事件。
  *
- * Creates the key-event queue and continuously detects key events using a
- * 1000 ms long-press threshold. Short-press and long-press events are sent
- * to the queue without waiting; KEY_EVENT_NONE is not sent. The task delays
- * for 10 RTOS ticks between detection attempts.
+ * 处理步骤：
+ * 1. 检查参数并将输出事件初始化为无事件。
+ * 2. 扫描按键；未按下时直接返回。
+ * 3. 忙等至长按阈值后再次扫描，已释放时判定为短按。
+ * 4. 仍按下时判定为长按，并等待释放以避免重复上报。
  *
- * @param[in] argument Pointer to the task argument. This parameter is not used.
+ * @param[out] p_key_event            : 接收按键事件的指针，不得为空。
+ * @param[in] long_press_threshold_ms : 长按阈值，单位为毫秒，须大于零。
  *
- * @return None. This task never returns. If queue creation fails,
- *         the task logs the error and remains blocked indefinitely.
+ * @return key_detect_result_t : 按键事件检测结果。
+ * @retval KEY_DETECT_OK                检测成功。
+ * @retval KEY_DETECT_ERROR             底层按键扫描失败。
+ * @retval KEY_DETECT_INVALID_PARAMETER 输入参数无效。
+ *
+ * @note 该函数包含任务延时，应在任务上下文中调用。
  */
-void key_task_entry(void *argument);
+key_detect_result_t Key_DetectEvent(key_event_t *p_key_event,
+                                  uint32_t long_press_threshold_ms);
 
 /**
- * @brief Detects and classifies a key press event.
+ * @brief 按键事件检测任务的入口函数。
  *
- * After a debounce delay, scans the key state. If the key is released,
- * the output event is set to KEY_EVENT_NONE. If the key is pressed, the
- * function waits for the specified long-press threshold and scans again.
- * A released key is classified as KEY_EVENT_SHORT_PRESS, while a key that
- * remains pressed is classified as KEY_EVENT_LONG_PRESS.
+ * 处理步骤：
+ * 1. 创建可容纳 10 个按键事件的队列。
+ * 2. 使用 1000 毫秒长按阈值检测按键事件。
+ * 3. 将短按和长按事件以零等待方式发送到队列，不发送无事件。
+ * 4. 每轮检测结束后延时 10 个系统节拍。
  *
- * @param[out] p_key_event Pointer to the variable that receives the detected
- *                         key event. This pointer must not be NULL.
- * @param[in] long_press_threshold_ms Long-press threshold in milliseconds.
- *                                    This value must be greater than zero.
+ * @param[in] p_argument : 任务参数指针，本任务不使用该参数，允许为空。
  *
- * @return key_detect_result_t Result of the key-event detection.
- * @retval KEY_DETECT_OK                Detection completed successfully.
- * @retval KEY_DETECT_ERROR             The underlying key scan failed.
- * @retval KEY_DETECT_INVALID_PARAMETER An input parameter is invalid.
+ * @return 无返回值；任务持续运行，不返回调用方。
+ *
+ * @note 队列创建失败时，输出错误日志并持续循环延时。
  */
-key_detect_result_t key_detect_event(key_event_t *p_key_event,
-                                     uint32_t long_press_threshold_ms);
-/************************ Function Declarations ************************/
+void Key_TaskEntry(void *p_argument);
 
-#endif /* End of __BSP_KEY_H__ */
+/****************************** Declaring ******************************/
+
+#endif /* __BSP_KEY_H__ */
